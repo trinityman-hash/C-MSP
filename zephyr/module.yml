@@ -1,0 +1,4 @@
+name: fault_inject
+build:
+  cmake: .
+  kconfig: Kconfig

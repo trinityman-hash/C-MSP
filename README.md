@@ -1,78 +1,102 @@
 # C-MSP — Fault-Injection Testing for Zephyr RTOS
 
-**Status: Step 1 of the roadmap complete and verified.** Not yet a Zephyr
-module — this step is deliberately host-only, per the project brief's own
-"concrete next step" (see `docs/brief.md`, §6): prove the idea catches a
-real bug before building any Zephyr/Twister integration around it.
+**Status: Steps 1 and 2 of the roadmap complete and verified** — including
+a real out-of-tree Zephyr module, built and run through the actual
+`west`/CMake/Kconfig/Ztest/Twister pipeline on `native_sim`, not just
+sketched. See `docs/verification.md` for the full log (real commands,
+real output, including a real AddressSanitizer report from inside a
+running Zephyr kernel).
 
 ## What's here
 
-A deterministic fault-injection primitive (`fault_inject.h/.c`) and a
-reconstruction of the bug pattern behind **CVE-2026-1679** (a Zephyr
-eswifi driver buffer overflow: a hardware-reported length is copied into
-a fixed buffer with no bounds check).
+**The module** (`include/fault_inject.h`, `src/fault_inject.c`,
+`Kconfig`, `CMakeLists.txt`, `zephyr/module.yml`) — a deterministic
+fault-injection primitive: arm/disarm/hit-count, compiles to exactly the
+wrapped call when disabled (nothing left in the binary, verified via
+`nm`), and is genuinely thread-safe under Zephyr (a `k_spinlock` guards
+the registry, since a fault point can legitimately be hit from an ISR or
+a different thread than the one arming it — a real RTOS concern the
+original host-only prototype didn't need to handle).
 
-The same test file (`tests/test_eswifi_recv.c`) is compiled against two
-implementations of the identical function:
+**The proof case** (`tests/drivers/eswifi_recv/`) — a reconstruction of
+the bug pattern behind **CVE-2026-1679** (a Zephyr eswifi driver buffer
+overflow: a hardware-reported length copied into a fixed buffer with no
+bounds check), with the *same test source* compiled against a buggy and
+a fixed implementation:
 
 - `src/eswifi_repro_buggy.c` — no bounds check (the "before")
 - `src/eswifi_repro_fixed.c` — validates the length first (the "after")
 
-## What's proven, and how
+**A release-safety guard** — `CONFIG_FAULT_INJECTION=y` is a hard CMake
+`FATAL_ERROR` outside a Ztest build, not just a Kconfig default. Verified
+by actually trying to build an unrelated sample with it enabled and
+confirming it fails (see `docs/verification.md` §2). This directly
+implements a safety property the brief only proposed (§3.4–3.5): a
+release image should be physically incapable of shipping these hooks,
+not merely have them "turned off".
 
+## Two ways to run the proof, both real
+
+**Host-only** (fast, no Zephyr needed — good for quick iteration):
 ```
 make test
 ```
+Builds and runs three binaries under ASan+UBSan: fixed (passes), disabled
+(passes, and `nm` confirms no fault-injection symbols exist), buggy
+(crashes — that crash is the expected, correct result).
 
-runs three builds under AddressSanitizer + UBSan:
+**Real Zephyr, via Twister** (the actual target environment):
+```
+west twister -p native_sim -T tests/drivers/eswifi_recv \
+  -x=ZEPHYR_EXTRA_MODULES=/path/to/this/repo
+```
+Runs the "fixed" variant as a genuine Ztest suite. The "buggy" variant is
+deliberately *not* a permanent Twister entry (a suite with a
+deliberately-always-red test pollutes CI signal) — it's a one-time,
+by-hand verification, documented with full output in
+`docs/verification.md` §3, exactly the same TDD discipline as
+`git stash`-ing a fix to confirm a test actually catches the regression.
 
-1. **`test_recv_fixed`** — all checks pass. The fault-injection point
-   forces the hardware-length call to report an oversized value (a
-   condition real hardware won't easily produce on demand), and the
-   fixed driver rejects it safely.
-2. **`test_disabled`** — compiled *without* `FAULT_INJECTION_ENABLED`,
-   and not linked against `fault_inject.c` at all. Passes cleanly, and
-   `nm` on the resulting binary contains none of the `fi_*` symbols —
-   proving `FI_POINT()` compiles to exactly the original call, not a
-   disabled check. (See brief §3.4 for why that distinction matters for
-   release builds.)
-3. **`test_recv_buggy`** — **expected to crash.** AddressSanitizer
-   reports a stack-buffer-overflow inside `memcpy`, at the exact line
-   with the missing bounds check, only when the fault-injected oversized
-   length is armed. That crash is the result being tested for: it's the
-   proof this reproduces a real defect, not a hypothetical one.
-
-All three outcomes were run and confirmed before this was pushed.
+Requires: `cmake`, `ninja`, `device-tree-compiler`, `gcc-multilib` (32-bit
+support, since `native_sim` defaults to a 32-bit build on x86_64), and
+`ZEPHYR_TOOLCHAIN_VARIANT=host` — no Zephyr SDK/cross-compiler needed for
+this board. No physical hardware involved anywhere.
 
 ## What's next
 
-Per the brief's roadmap (§3.8–3.9): package this primitive as a real
-out-of-tree Zephyr module (`zephyr/module.yml`, Kconfig, Ztest test under
-Twister), targeting `native_sim`. That step needs a Zephyr SDK and `west`
-toolchain this environment doesn't have — the code here is structured so
-that's a port, not a rewrite: `fault_inject.h/.c` has no host-specific
-dependencies beyond a C11 compiler, and the fault-point pattern
-(`FI_POINT(id, real_call)`) is exactly the macro proposed for the Zephyr
-module.
-
-Not done yet, on purpose (see brief §3.8, "everything past this is
-deliberately deferred"): probabilistic failure, a Shell-based live-arming
-interface, additional fault kinds, additional platforms.
+Per the brief's roadmap (§3.9): once this is demonstrably useful
+standalone, post it against the still-open Zephyr issue #3559 as a
+concrete proposal. Not done yet, deliberately (brief §3.8): probabilistic
+failure, a Shell-based live-arming interface for real hardware,
+additional fault kinds, additional platforms/boards, CI wiring (an
+unverified GitHub Actions config is worse than none — see
+`docs/verification.md`, "What wasn't verified here").
 
 ## Layout
 
 ```
-include/
-  fault_inject.h       fault-injection primitive (arm/disarm/hit-count)
-  eswifi_repro.h        shared driver-bug-repro interface
-src/
-  fault_inject.c        registry implementation
-  eswifi_repro_buggy.c   before: missing bounds check
-  eswifi_repro_fixed.c   after: bounds checked
-tests/
-  test_eswifi_recv.c              the proof case (linked twice, see Makefile)
-  test_disabled_compiles_out.c    proves FI_POINT vanishes when disabled
+zephyr/module.yml         west module declaration
+CMakeLists.txt            module build + the release-safety hard-fail
+Kconfig                   CONFIG_FAULT_INJECTION, CONFIG_FAULT_INJECTION_MAX_POINTS
+include/fault_inject.h    the module's public header
+src/fault_inject.c        registry implementation (spinlock-protected under Zephyr)
+Makefile                  host-only build (make test) -- no Zephyr required
+tests/drivers/eswifi_recv/
+  testcase.yaml            Twister test definition (fixed variant only, see above)
+  prj.conf, CMakeLists.txt Zephyr test-app build files
+  src/
+    eswifi_repro.h           test-fixture: shared driver-bug-repro interface
+    eswifi_repro_buggy.c     test-fixture: before (missing bounds check)
+    eswifi_repro_fixed.c     test-fixture: after (bounds checked)
+    test_eswifi_recv.c       host-build test (used by the top-level Makefile)
+    test_eswifi_recv_ztest.c real Zephyr/Ztest port of the same test
+    test_disabled_compiles_out.c   proves FI_POINT vanishes when disabled
 docs/
-  brief.md               original research brief this project is built from
-Makefile
+  brief.md            original research brief this project is built from
+  verification.md     full real-command/real-output log for Step 2
 ```
+
+Note: the driver-bug fixtures live under `tests/`, not `include/`/`src/`
+— they're specific to proving this module catches a real bug, not part
+of what the module itself would ship if published standalone (brief
+§3.9). Only `fault_inject.h/.c` is "the module."

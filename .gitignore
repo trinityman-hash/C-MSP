@@ -1,0 +1,7 @@
+# host-only Makefile build
+/build/
+
+# Zephyr/west build output (if built inside this repo directory)
+/build*/
+*.pyc
+__pycache__/

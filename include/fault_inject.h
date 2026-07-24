@@ -22,9 +22,13 @@
 
 #include <stdint.h>
 
-#define FI_MAX_POINTS 32
+#ifdef CONFIG_FAULT_INJECTION_MAX_POINTS
+#define FI_MAX_POINTS CONFIG_FAULT_INJECTION_MAX_POINTS
+#else
+#define FI_MAX_POINTS 32 /* host-only build default; Zephyr sets this via Kconfig */
+#endif
 
-#ifdef FAULT_INJECTION_ENABLED
+#ifdef CONFIG_FAULT_INJECTION
 
 /* Increments the point's hit count every time it is evaluated (armed or
  * not), so a test can prove the point was actually reached. Returns 0 if
@@ -36,6 +40,13 @@ void fi_arm(uint32_t fault_id, int inject_value);
 void fi_disarm(uint32_t fault_id);
 void fi_reset_all(void);
 uint32_t fi_hit_count(uint32_t fault_id);
+
+/* Thread safety: under Zephyr, the registry is protected by a spinlock,
+ * so fi_should_fail() is safe to call from any thread or ISR context
+ * while another thread arms/disarms/reads it -- necessary because a
+ * fault point may legitimately be hit from a driver ISR while a test
+ * thread is (dis)arming it. In the host-only build (no Zephyr present)
+ * there is no locking, since host tests here are single-threaded. */
 
 /* GCC/Clang statement-expression: evaluates fi_should_fail() exactly
  * once, and evaluates real_call only when the point is not armed, so an
@@ -49,6 +60,6 @@ uint32_t fi_hit_count(uint32_t fault_id);
 
 #define FI_POINT(id, real_call) (real_call)
 
-#endif /* FAULT_INJECTION_ENABLED */
+#endif /* CONFIG_FAULT_INJECTION */
 
 #endif /* FAULT_INJECT_H */

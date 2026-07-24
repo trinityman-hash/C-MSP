@@ -1,0 +1,25 @@
+menuconfig FAULT_INJECTION
+	bool "Fault injection test hooks"
+	default n
+	help
+	  Enables FI_POINT() hooks throughout the tree. Intended for
+	  test/CI builds only -- see FAULT_INJECTION_RELEASE_GUARD below.
+	  When disabled, FI_POINT() compiles to exactly the wrapped call:
+	  no fault-injection code exists in the binary at all, not merely
+	  a disabled check.
+
+if FAULT_INJECTION
+
+config FAULT_INJECTION_MAX_POINTS
+	int "Maximum number of distinct fault injection points"
+	default 32
+	help
+	  Fixed-size table capacity for the fault registry. No dynamic
+	  allocation is used, so this bounds RAM use deterministically.
+
+# Enforcement of "must not ship in a non-test build" is a CMake-time
+# FATAL_ERROR in this module's CMakeLists.txt, not here -- a Kconfig bool
+# can express a default, but it cannot fail a build on its own, and a
+# help-text-only promise is not a guard.
+
+endif # FAULT_INJECTION

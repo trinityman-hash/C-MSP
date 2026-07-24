@@ -1,0 +1,17 @@
+common:
+  tags:
+    - fault_injection
+    - drivers
+  platform_allow:
+    - native_sim
+  harness: ztest
+  extra_configs:
+    - CONFIG_FAULT_INJECTION=y
+    - CONFIG_FAULT_INJECTION_MAX_POINTS=8
+    - CONFIG_ASAN=y
+    - CONFIG_UBSAN=y
+
+tests:
+  drivers.eswifi_recv.fixed:
+    extra_args:
+      - ESWIFI_RECV_VARIANT=fixed
