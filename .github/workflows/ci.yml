@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Fast path: no Zephyr checkout needed. Builds and runs the three
+  # host-only binaries under ASan+UBSan exactly as `make test` does
+  # locally (see README). This is the primary regression gate and
+  # should stay green on every commit.
+  host-test:
+    name: Host-only proof (make test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: make test
+        run: make test
+
+  # Real path: builds this module against an actual Zephyr checkout and
+  # runs it through west/Ztest/Twister on native_sim, reproducing the
+  # commands already verified by hand in docs/verification.md. Uses the
+  # host's own gcc (ZEPHYR_TOOLCHAIN_VARIANT=host) -- no Zephyr SDK
+  # download needed for this board, per docs/verification.md.
+  zephyr-twister:
+    name: Zephyr native_sim (west twister)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout module
+        uses: actions/checkout@v4
+        with:
+          path: fault-inject-module
+
+      - name: Install native_sim build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build gcc-multilib g++-multilib device-tree-compiler
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install west
+        run: pip install west
+
+      - name: Initialize a minimal Zephyr workspace
+        # group-filter drops HAL/bootloader/BabbleSim import groups --
+        # none of them are needed to build native_sim, and skipping
+        # them keeps this job's checkout size and runtime reasonable.
+        run: |
+          west init -m https://github.com/zephyrproject-rtos/zephyr --mr main zephyrproject
+          cd zephyrproject
+          west config manifest.group-filter -- -hal,-babblesim,-bootloader,-tools
+          west update --narrow -o=--depth=1
+
+      - name: Install Zephyr Python requirements
+        run: pip install -r zephyrproject/zephyr/scripts/requirements-base.txt
+
+      - name: west twister -p native_sim (fixed variant)
+        env:
+          ZEPHYR_TOOLCHAIN_VARIANT: host
+        run: |
+          cd zephyrproject
+          west twister -p native_sim \
+            -T "${GITHUB_WORKSPACE}/fault-inject-module/tests/drivers/eswifi_recv" \
+            -x=ZEPHYR_EXTRA_MODULES="${GITHUB_WORKSPACE}/fault-inject-module" \
+            --inline-logs -v
+
+      - name: Verify the release-safety guard (CONFIG_FAULT_INJECTION outside Ztest must fail)
+        # Automates the check that docs/verification.md section 2 only
+        # ran by hand: enabling CONFIG_FAULT_INJECTION on a non-Ztest
+        # image must be a hard CMake configure-time failure, not a
+        # silent pass-through. `west build` succeeding here is the
+        # failure condition for this step.
+        env:
+          ZEPHYR_TOOLCHAIN_VARIANT: host
+        run: |
+          cd zephyrproject
+          if west build -p always -b native_sim zephyr/samples/hello_world \
+              -d build_guard_check -- \
+              -DZEPHYR_EXTRA_MODULES="${GITHUB_WORKSPACE}/fault-inject-module" \
+              -DCONFIG_FAULT_INJECTION=y \
+              > guard_check.log 2>&1; then
+            echo "::error::Release guard did not fail the build -- CONFIG_FAULT_INJECTION=y was allowed outside a Ztest image."
+            cat guard_check.log
+            exit 1
+          fi
+          if ! grep -q "CONFIG_FAULT_INJECTION=y outside a Ztest build" guard_check.log; then
+            echo "::error::Build failed, but not with the expected release-guard message. Some other error occurred."
+            cat guard_check.log
+            exit 1
+          fi
+          echo "Release guard correctly rejected the build:"
+          grep -A2 "CONFIG_FAULT_INJECTION=y outside a Ztest build" guard_check.log
