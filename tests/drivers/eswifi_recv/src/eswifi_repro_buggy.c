@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+
 /* eswifi_repro_buggy.c
  *
  * Reproduces the CVE-2026-1679 pattern: the reported length is copied
