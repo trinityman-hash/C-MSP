@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+
 /* fault_inject.c
  *
  * Deterministic, table-backed fault registry. Only built when
