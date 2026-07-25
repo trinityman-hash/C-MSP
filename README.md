@@ -35,6 +35,16 @@ implements a safety property the brief only proposed (§3.4–3.5): a
 release image should be physically incapable of shipping these hooks,
 not merely have them "turned off".
 
+**CI** (`.github/workflows/ci.yml`) — two jobs: `make test` on every
+push (no Zephyr checkout needed), and a `west twister -p native_sim` run
+of the real Zephyr module plus an automated re-check of the release
+guard. The workflow's exact recipe was reproduced by hand before trusting
+it; two bugs it had were found and fixed that way (a missing
+`manifest.project-filter` for `nrf_hw_models`, and Python requirements
+insufficient for `west twister` to even start) — see
+`docs/verification.md` §4 for the details and the confirmed-passing
+local re-run.
+
 ## Two ways to run the proof, both real
 
 **Host-only** (fast, no Zephyr needed — good for quick iteration):
@@ -68,13 +78,17 @@ Per the brief's roadmap (§3.9): once this is demonstrably useful
 standalone, post it against the still-open Zephyr issue #3559 as a
 concrete proposal. Not done yet, deliberately (brief §3.8): probabilistic
 failure, a Shell-based live-arming interface for real hardware,
-additional fault kinds, additional platforms/boards, CI wiring (an
-unverified GitHub Actions config is worse than none — see
-`docs/verification.md`, "What wasn't verified here").
+additional fault kinds, additional platforms/boards.
+
+CI is now wired up and its recipe verified locally (see above), but a
+real green run on GitHub's own runners is still the outstanding check —
+local reproduction of a CI recipe is good evidence, not a substitute for
+GitHub Actions actually saying so.
 
 ## Layout
 
 ```
+.github/workflows/ci.yml  CI: make test + west twister on native_sim
 zephyr/module.yml         west module declaration
 CMakeLists.txt            module build + the release-safety hard-fail
 Kconfig                   CONFIG_FAULT_INJECTION, CONFIG_FAULT_INJECTION_MAX_POINTS
@@ -93,7 +107,7 @@ tests/drivers/eswifi_recv/
     test_disabled_compiles_out.c   proves FI_POINT vanishes when disabled
 docs/
   brief.md            original research brief this project is built from
-  verification.md     full real-command/real-output log for Step 2
+  verification.md     full real-command/real-output log for Step 2 and CI
 ```
 
 Note: the driver-bug fixtures live under `tests/`, not `include/`/`src/`
