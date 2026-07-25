@@ -1,4 +1,4 @@
-name: CI
+   name: CI
 
 on:
   push:
@@ -52,14 +52,34 @@ jobs:
         # group-filter drops HAL/bootloader/BabbleSim import groups --
         # none of them are needed to build native_sim, and skipping
         # them keeps this job's checkout size and runtime reasonable.
+        # project-filter additionally drops nrf_hw_models: it isn't in
+        # any filterable group, but its CMakeLists.txt hard-depends on
+        # hal_nordic, which the group-filter above removes. Left in,
+        # `west build`/`west twister` fail CMake configure with "Unmet
+        # or cyclic dependencies in modules: nrf_hw_models depends on:
+        # ['hal_nordic']" -- reproduced locally with this exact recipe
+        # before adding this line.
         run: |
           west init -m https://github.com/zephyrproject-rtos/zephyr --mr main zephyrproject
           cd zephyrproject
           west config manifest.group-filter -- -hal,-babblesim,-bootloader,-tools
+          west config manifest.project-filter -- -nrf_hw_models
           west update --narrow -o=--depth=1
 
       - name: Install Zephyr Python requirements
-        run: pip install -r zephyrproject/zephyr/scripts/requirements-base.txt
+        # requirements-base.txt alone is not sufficient to run
+        # twister: it's missing packages twister imports at startup
+        # (natsort, tabulate from requirements-run-test.txt; colorama,
+        # ply from requirements-build-test.txt). Confirmed locally --
+        # under requirements-base.txt alone, `west twister` fails
+        # immediately with `ModuleNotFoundError: No module named
+        # 'natsort'` before running anything. requirements-compliance.txt
+        # and requirements-extras.txt are deliberately left out -- they
+        # cover linting/footprint/release tooling twister never imports.
+        run: |
+          pip install -r zephyrproject/zephyr/scripts/requirements-base.txt \
+                       -r zephyrproject/zephyr/scripts/requirements-build-test.txt \
+                       -r zephyrproject/zephyr/scripts/requirements-run-test.txt
 
       - name: west twister -p native_sim (fixed variant)
         env:
@@ -96,4 +116,4 @@ jobs:
             exit 1
           fi
           echo "Release guard correctly rejected the build:"
-          grep -A2 "CONFIG_FAULT_INJECTION=y outside a Ztest build" guard_check.log
+          grep -A2 "CONFIG_FAULT_INJECTION=y outside a Ztest build" guard_check.log  
