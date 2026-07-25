@@ -98,6 +98,85 @@ Note the stack trace runs through real Zephyr kernel machinery
 `nct_thread_starter`) -- this is the actual RTOS scheduler and Ztest
 runner catching the fault-injected condition, not a simulated result.
 
+## 4. CI workflow (`.github/workflows/ci.yml`): two bugs found and fixed by local reproduction
+
+`ci.yml` was added directly on GitHub, not by Claude, and its
+`zephyr-twister` job had not been run anywhere before this. Rather than
+trust it, its exact recipe was reproduced by hand in a scratch
+workspace, same as everything else in this log.
+
+**Bug 1 -- missing project-filter.** The job's
+`west config manifest.group-filter -- -hal,-babblesim,-bootloader,-tools`
+excludes `hal_nordic`, but `nrf_hw_models` is an *ungrouped* project, so
+the group-filter doesn't touch it -- and `nrf_hw_models` hard-depends on
+`hal_nordic`. Running the job's exact `west init`/`west update` recipe
+as written, then `west build -b native_sim samples/hello_world`,
+reproduced:
+
+```
+CMake Error at .../zephyr_module.cmake:73 (message):
+  Unmet or cyclic dependencies in modules:
+
+  .../modules/bsim_hw_models/nrf_hw_models depends on:
+  ['hal_nordic']
+```
+
+Fix: add `west config manifest.project-filter -- -nrf_hw_models`
+alongside the group-filter. Re-running `west update` then the same
+`west build` afterward: **succeeded**, `zephyr.exe` built and ran
+("Hello World! native_sim/native").
+
+**Bug 2 -- insufficient pip requirements.** The job's
+`pip install -r zephyr/scripts/requirements-base.txt` is not enough to
+run `west twister` at all -- `twisterlib` imports `natsort` at import
+time, which lives in `requirements-run-test.txt`, not
+`requirements-base.txt`. Reproduced:
+
+```
+File ".../twisterlib/hardwaremap.py", line 20, in <module>
+    from natsort import natsorted
+ModuleNotFoundError: No module named 'natsort'
+```
+
+Fix: also install `requirements-build-test.txt` (covers `colorama`,
+`ply`, also imported by twister) and `requirements-run-test.txt`
+(covers `natsort`, `tabulate`). `requirements-compliance.txt` and
+`requirements-extras.txt` were checked and are not needed -- nothing in
+them is imported by twister or this module's build.
+
+**Full job re-verified end-to-end after both fixes**, using the real
+module (not just `hello_world`):
+
+```
+west twister -p native_sim \
+  -T /path/to/C-MSP/tests/drivers/eswifi_recv \
+  -x=ZEPHYR_EXTRA_MODULES=/path/to/C-MSP \
+  --inline-logs -v
+```
+
+```
+INFO    - 1/1 native_sim/native         drivers.eswifi_recv.fixed          PASSED (native 0.069s <host/gnu>)
+INFO    - 1 of 1 executed test configurations passed (100.00%), 0 built (not run), 0 failed, 0 errored
+INFO    - 2 of 2 executed test cases passed (100.00%) on 1 out of total 1640 platforms (0.06%).
+```
+
+The job's release-safety guard-check step (same CMake-error assertion
+as verification §2 above, automated) was also re-run against the fixed
+workspace and correctly rejected the build with the expected message.
+
+The `host-test` job (`make test`) was re-checked too, unchanged and
+still green: fixed passes, disabled passes, buggy crashes under ASan as
+expected.
+
+**Not yet done:** pushing the fixed `ci.yml` back to the repo. The
+connected GitHub App token doesn't carry the `workflows` permission, so
+writes to any path under `.github/workflows/` are rejected by GitHub's
+API regardless of branch (`403: refusing to allow a GitHub App to
+create or update workflow ... without workflows permission`). The
+verified diff is provided separately for the user to apply. Actually
+triggering the workflow on GitHub's own runners (the one thing no local
+reproduction can substitute for) is still outstanding either way.
+
 ## What this establishes
 
 Both proof requirements from `docs/brief.md` §6 are now met twice: once
@@ -112,7 +191,7 @@ designed under the actual target toolchain, not a stand-in for it.
 - Real hardware / a physical board -- this is `native_sim` only.
 - QEMU-emulated targets.
 - Any board other than `native_sim`.
-- CI wiring (a GitHub Actions workflow calling `west twister`) -- not
-  built, since it can't be verified from this environment without
-  actually running it in GitHub's CI, and an unverified CI config is
-  worse than no CI config.
+- The actual GitHub Actions run of `ci.yml` on GitHub's own runners --
+  see §4. The workflow's recipe has now been reproduced and fixed
+  locally, but a local reproduction of the same commands is still not
+  the same signal as a real run on GitHub's infrastructure.
