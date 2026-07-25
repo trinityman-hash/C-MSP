@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+
 /* test_disabled_compiles_out.c
  *
  * Compiled WITHOUT -DCONFIG_FAULT_INJECTION, and linked against
