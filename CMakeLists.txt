@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 if(CONFIG_FAULT_INJECTION)
 
   # Real enforcement of "must not ship in a non-test build": a Kconfig

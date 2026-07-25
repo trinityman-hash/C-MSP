@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+
 /* eswifi_repro_fixed.c
  *
  * Same function signature as eswifi_repro_buggy.c, but validates the

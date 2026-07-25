@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+
 /* test_eswifi_recv.c (Ztest)
  *
  * Zephyr/Ztest port of the same proof case already verified on the host

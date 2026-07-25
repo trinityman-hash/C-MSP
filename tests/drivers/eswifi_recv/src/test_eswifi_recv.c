@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+
 /* test_eswifi_recv.c
  *
  * This file is compiled and linked twice against two different

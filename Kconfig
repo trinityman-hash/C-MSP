@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 menuconfig FAULT_INJECTION
 	bool "Fault injection test hooks"
 	default n

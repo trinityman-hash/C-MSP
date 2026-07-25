@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 CC = gcc
 INC = -Iinclude
 WARN = -Wall -Wextra -Werror

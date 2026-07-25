@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+
 /* eswifi_repro.h
  *
  * A small, simplified reconstruction of the bug pattern behind
